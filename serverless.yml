@@ -11,7 +11,6 @@ provider:
   timeout: 900
   environment:
     S3_BUCKET: ${self:custom.s3Bucket}
-    AWS_DEFAULT_REGION: ${self:provider.region}
     BACKFILL: ${self:custom.backfill}
   iam:
     role:
