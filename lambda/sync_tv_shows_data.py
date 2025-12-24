@@ -24,16 +24,10 @@ logger = logging.getLogger(__name__)
 
 
 TV_SHOWS_API_URL = "https://api.tvmaze.com/shows"
-DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-METADATA_FILE = os.path.join(DATA_DIR, "tv_shows_sync_metadata.json")
 
 S3_BUCKET = os.environ.get("S3_BUCKET", "tv-shows-data")
 S3_PREFIX = "tv_shows_data"
-
-API_DATA_DIR = os.path.join(DATA_DIR, "tv_shows_api")
-
-# Create directories if they don't exist
-os.makedirs(API_DATA_DIR, exist_ok=True)
+METADATA_S3_KEY = f"{S3_PREFIX}/metadata/tv_shows_sync_metadata.json"
 
 
 class TVShowsDataSync:
@@ -61,20 +55,30 @@ class TVShowsDataSync:
         self.s3_cached_objects = {}
         
     def _load_metadata(self) -> Dict:
-        """Load sync metadata."""
-        if os.path.exists(METADATA_FILE):
-            with open(METADATA_FILE, 'r') as f:
-                return json.load(f)
-        else:
-            return {
-                "last_sync": None
-            }
+        """Load sync metadata from S3."""
+        try:
+            response = self.s3_client.get_object(Bucket=S3_BUCKET, Key=METADATA_S3_KEY)
+            metadata = json.loads(response['Body'].read().decode('utf-8'))
+            return metadata
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                return {
+                    "last_sync": None
+                }
+            else:
+                logger.error(f"Error loading metadata from S3: {str(e)}")
+                raise
             
     def _save_metadata(self, metadata: Dict) -> None:
-        """Save sync metadata."""
+        """Save sync metadata to S3."""
         metadata["last_sync"] = datetime.datetime.now().isoformat()
-        with open(METADATA_FILE, 'w') as f:
-            json.dump(metadata, f, indent=2)
+        metadata_json = json.dumps(metadata, indent=2)
+        self.s3_client.put_object(
+            Bucket=S3_BUCKET,
+            Key=METADATA_S3_KEY,
+            Body=metadata_json.encode('utf-8'),
+            ContentType='application/json'
+        )
     
     def _normalize_keys(self, data: Dict) -> Dict:
         """Convert keys to snake_case."""
@@ -177,54 +181,40 @@ class TVShowsDataSync:
                             normalized_show = self._normalize_keys(show)
                             normalized_data["shows"].append(normalized_show)
                 
-                timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-                api_file = os.path.join(API_DATA_DIR, f"tv_shows_api_{timestamp}.json")
-                with open(api_file, 'w') as f:
-                    json.dump(normalized_data, f, indent=2)
-                
                 api_data = normalized_data
             
+            logger.info(f"Fetched {len(api_data.get('shows', []))} shows from API")
+            
+            # Save metadata after successful fetch
             self._save_metadata(metadata)
             
-            logger.info(f"Fetched {len(api_data.get('shows', []))} shows from API")
             return api_data
             
         except Exception as e:
             logger.error(f"Error fetching data: {str(e)}")
             raise
 
-    def upload_to_s3(self):
+    def upload_to_s3(self, api_data: Dict):
         """Upload the processed data to S3 bucket."""
         try:
             current_date = datetime.datetime.now().strftime("%Y/%m/%d")
-            
-            logger.info("Uploading metadata to S3")
-            s3_metadata_key = f"{S3_PREFIX}/metadata/tv_shows_sync_metadata.json"
-            self.s3_client.upload_file(
-                METADATA_FILE,
-                S3_BUCKET,
-                s3_metadata_key
-            )
-            
-            existing_objects = {}
-            api_prefix = f"{S3_PREFIX}/api/"
-            existing_objects['api'] = set(self._list_s3_objects(api_prefix))
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             
             logger.info("Uploading API data to S3")
-            for filename in os.listdir(API_DATA_DIR):
-                if filename.endswith('.json'):
-                    file_path = os.path.join(API_DATA_DIR, filename)
-                    s3_key = f"{S3_PREFIX}/api/load_date={current_date}/{filename}"
-                    
-                    if s3_key in existing_objects['api']:
-                        logger.info(f"Skipping {s3_key} - already exists")
-                        continue
-                        
-                    self.s3_client.upload_file(
-                        file_path,
-                        S3_BUCKET,
-                        s3_key
-                    )
+            s3_key = f"{S3_PREFIX}/api/load_date={current_date}/tv_shows_api_{timestamp}.json"
+            
+            # Check if file already exists
+            if self._check_s3_object_exists(s3_key):
+                logger.info(f"Skipping {s3_key} - already exists")
+            else:
+                api_json = json.dumps(api_data, indent=2)
+                self.s3_client.put_object(
+                    Bucket=S3_BUCKET,
+                    Key=s3_key,
+                    Body=api_json.encode('utf-8'),
+                    ContentType='application/json'
+                )
+                logger.info(f"Uploaded API data to {s3_key}")
             
             logger.info("Data upload to S3 completed successfully")
             
@@ -239,8 +229,8 @@ def lambda_handler(event, context):
         aws_region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
         
         data_sync = TVShowsDataSync(aws_region=aws_region)
-        data_sync.fetch_data(backfill=backfill)
-        data_sync.upload_to_s3()
+        api_data = data_sync.fetch_data(backfill=backfill)
+        data_sync.upload_to_s3(api_data)
         
         logger.info("TV Shows data sync completed successfully")
         
@@ -267,8 +257,8 @@ def main():
         aws_region = os.environ.get("AWS_DEFAULT_REGION") or os.environ.get("AWS_REGION")
         
         data_sync = TVShowsDataSync(aws_region=aws_region)
-        data_sync.fetch_data(backfill=backfill)
-        data_sync.upload_to_s3()
+        api_data = data_sync.fetch_data(backfill=backfill)
+        data_sync.upload_to_s3(api_data)
         
         logger.info("TV Shows data sync completed successfully")
         
