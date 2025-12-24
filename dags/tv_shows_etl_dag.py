@@ -8,7 +8,7 @@ This DAG:
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.providers.amazon.aws.operators.lambda_function import (
-    AwsLambdaInvokeFunctionOperator,
+    LambdaInvokeFunctionOperator,
 )
 import json
 
@@ -37,7 +37,7 @@ with DAG(
     catchup=False,
     tags=["tv-shows", "lambda", "data-extraction"],
 ) as dag:
-    extract_task = AwsLambdaInvokeFunctionOperator(
+    extract_task = LambdaInvokeFunctionOperator(
         task_id="extract_tv_shows_data",
         function_name=LAMBDA_FUNCTION_NAME,
         payload=LAMBDA_PAYLOAD,
