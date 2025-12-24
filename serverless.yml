@@ -1,0 +1,127 @@
+service: tv-shows-sync
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: provided.al2
+  region: ${opt:region, 'us-east-1'}
+  stage: ${opt:stage, 'dev'}
+  memorySize: 1024
+  timeout: 900
+  environment:
+    S3_BUCKET: ${self:custom.s3Bucket}
+    AWS_DEFAULT_REGION: ${self:provider.region}
+    BACKFILL: ${self:custom.backfill}
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:PutObject
+            - s3:GetObject
+            - s3:ListBucket
+          Resource:
+            - arn:aws:s3:::${self:custom.s3Bucket}/*
+            - arn:aws:s3:::${self:custom.s3Bucket}
+
+functions:
+  sync:
+    image:
+      uri: ${self:custom.ecrRepositoryUri}:${self:custom.imageTag}
+    events:
+      - schedule:
+          rate: cron(0 2 * * ? *)
+          enabled: true
+
+custom:
+  ecrRepository: tv-shows-sync
+  ecrRepositoryUri: ${aws:accountId}.dkr.ecr.${self:provider.region}.amazonaws.com/${self:custom.ecrRepository}
+  imageTag: ${env:IMAGE_TAG, 'latest'}
+  s3Bucket: ${env:S3_BUCKET, 'tv-shows-data'}
+  backfill: ${env:BACKFILL, 'false'}
+
+resources:
+  Resources:
+    ECRRepository:
+      Type: AWS::ECR::Repository
+      Properties:
+        RepositoryName: ${self:custom.ecrRepository}
+        ImageTagMutability: MUTABLE
+        LifecyclePolicy:
+          LifecyclePolicyText: |
+            {
+              "rules": [
+                {
+                  "rulePriority": 1,
+                  "description": "Keep last 10 images",
+                  "selection": {
+                    "tagStatus": "any",
+                    "countType": "imageCountMoreThan",
+                    "countNumber": 10
+                  },
+                  "action": {
+                    "type": "expire"
+                  }
+                }
+              ]
+            }
+    
+    CIUser:
+      Type: AWS::IAM::User
+      Properties:
+        UserName: ${self:service}-${self:provider.stage}-ci-cd
+        Policies:
+          - PolicyName: ECRAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ecr:GetAuthorizationToken
+                    - ecr:BatchCheckLayerAvailability
+                    - ecr:GetDownloadUrlForLayer
+                    - ecr:BatchGetImage
+                    - ecr:PutImage
+                    - ecr:InitiateLayerUpload
+                    - ecr:UploadLayerPart
+                    - ecr:CompleteLayerUpload
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                    - s3:GetObject
+                  Resource:
+                    - arn:aws:s3:::${self:custom.s3Bucket}/*
+          - PolicyName: LambdaDeployAccess
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:UpdateFunctionCode
+                    - lambda:GetFunction
+                    - lambda:UpdateFunctionConfiguration
+                    - lambda:CreateFunction
+                    - lambda:DeleteFunction
+                  Resource: '*'
+                - Effect: Allow
+                  Action:
+                    - iam:PassRole
+                  Resource:
+                    - arn:aws:iam::${aws:accountId}:role/${self:service}-${self:provider.stage}-*
+                - Effect: Allow
+                  Action:
+                    - events:PutRule
+                    - events:PutTargets
+                    - events:RemoveTargets
+                    - events:DeleteRule
+                  Resource: '*'
+
+  Outputs:
+    ECRRepositoryUri:
+      Value: ${self:custom.ecrRepositoryUri}
+    LambdaFunctionName:
+      Value: ${self:service}-${self:provider.stage}-sync
+    CIUserArn:
+      Value: !GetAtt CIUser.Arn

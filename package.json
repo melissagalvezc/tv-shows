@@ -1,0 +1,18 @@
+{
+  "name": "tv-shows-sync",
+  "version": "1.0.0",
+  "description": "TV Shows data sync service",
+  "scripts": {
+    "sls:deploy": "serverless deploy",
+    "sls:remove": "serverless remove",
+    "sls:logs": "serverless logs -f sync -t"
+  },
+  "devDependencies": {
+    "serverless": "^3.38.0",
+    "serverless-lift": "^1.24.0"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+

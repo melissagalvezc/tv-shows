@@ -1,0 +1,304 @@
+name: Setup Airflow MWAA
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Environment stage (dev/prod)'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - dev
+          - prod
+      vpc_id:
+        description: 'VPC ID for MWAA'
+        required: true
+        type: string
+      subnet_ids:
+        description: 'Subnet IDs (comma-separated, at least 2)'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  setup-mwaa:
+    name: Setup MWAA Environment
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set variables
+        id: vars
+        run: |
+          echo "environment_name=tv-shows-airflow-${{ github.event.inputs.stage }}" >> $GITHUB_OUTPUT
+          echo "s3_bucket_name=tv-shows-airflow-dags-${{ github.event.inputs.stage }}" >> $GITHUB_OUTPUT
+          echo "role_name=mwaa-execution-role-${{ github.event.inputs.stage }}" >> $GITHUB_OUTPUT
+          echo "sg_name=mwaa-sg-${{ github.event.inputs.stage }}" >> $GITHUB_OUTPUT
+
+      - name: Get AWS Account ID
+        id: get-account-id
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Create S3 bucket for Airflow DAGs
+        run: |
+          if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+            aws s3api create-bucket \
+              --bucket ${{ steps.vars.outputs.s3_bucket_name }} \
+              --region ${{ env.AWS_REGION }} 2>/dev/null || echo "Bucket already exists"
+          else
+            aws s3api create-bucket \
+              --bucket ${{ steps.vars.outputs.s3_bucket_name }} \
+              --region ${{ env.AWS_REGION }} \
+              --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }} 2>/dev/null || echo "Bucket already exists"
+          fi
+
+      - name: Configure S3 bucket
+        run: |
+          aws s3api put-bucket-versioning \
+            --bucket ${{ steps.vars.outputs.s3_bucket_name }} \
+            --versioning-configuration Status=Enabled
+          
+          aws s3api put-bucket-encryption \
+            --bucket ${{ steps.vars.outputs.s3_bucket_name }} \
+            --server-side-encryption-configuration '{
+                "Rules": [{
+                    "ApplyServerSideEncryptionByDefault": {
+                        "SSEAlgorithm": "AES256"
+                    }
+                }]
+            }'
+
+      - name: Create IAM trust policy
+        run: |
+          cat > /tmp/mwaa-trust-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Principal": {
+                  "Service": [
+                    "airflow.amazonaws.com",
+                    "airflow-env.amazonaws.com"
+                  ]
+                },
+                "Action": "sts:AssumeRole"
+              }
+            ]
+          }
+          EOF
+
+      - name: Create IAM role for MWAA
+        run: |
+          aws iam create-role \
+            --role-name ${{ steps.vars.outputs.role_name }} \
+            --assume-role-policy-document file:///tmp/mwaa-trust-policy.json 2>/dev/null || echo "Role already exists"
+
+      - name: Create IAM policy for MWAA
+        run: |
+          cat > /tmp/mwaa-policy.json <<EOF
+          {
+            "Version": "2012-10-17",
+            "Statement": [
+              {
+                "Effect": "Allow",
+                "Action": "airflow:PublishMetrics",
+                "Resource": "arn:aws:airflow:${{ env.AWS_REGION }}:${{ steps.get-account-id.outputs.account_id }}:environment/${{ steps.vars.outputs.environment_name }}"
+              },
+              {
+                "Effect": "Deny",
+                "Action": "s3:ListAllMyBuckets",
+                "Resource": [
+                  "arn:aws:s3:::${{ steps.vars.outputs.s3_bucket_name }}",
+                  "arn:aws:s3:::${{ steps.vars.outputs.s3_bucket_name }}/*"
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject*",
+                  "s3:GetBucket*",
+                  "s3:List*"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::${{ steps.vars.outputs.s3_bucket_name }}",
+                  "arn:aws:s3:::${{ steps.vars.outputs.s3_bucket_name }}/*"
+                ]
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "logs:CreateLogGroup",
+                  "logs:CreateLogStream",
+                  "logs:PutLogEvents",
+                  "logs:GetLogEvents",
+                  "logs:GetLogGroup",
+                  "logs:DescribeLogStreams"
+                ],
+                "Resource": "arn:aws:logs:${{ env.AWS_REGION }}:${{ steps.get-account-id.outputs.account_id }}:log-group:airflow-${{ steps.vars.outputs.environment_name }}-*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "logs:DescribeLogGroups",
+                "Resource": "arn:aws:logs:${{ env.AWS_REGION }}:${{ steps.get-account-id.outputs.account_id }}:log-group:airflow-${{ steps.vars.outputs.environment_name }}-*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "cloudwatch:PutMetricData",
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "lambda:InvokeFunction",
+                "Resource": "arn:aws:lambda:${{ env.AWS_REGION }}:${{ steps.get-account-id.outputs.account_id }}:function:tv-shows-sync-*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "ecs:RunTask",
+                  "ecs:DescribeTasks",
+                  "ecs:DescribeTaskDefinition"
+                ],
+                "Resource": "*"
+              },
+              {
+                "Effect": "Allow",
+                "Action": "iam:PassRole",
+                "Resource": "*",
+                "Condition": {
+                  "StringEquals": {
+                    "iam:PassedToService": "ecs-tasks.amazonaws.com"
+                  }
+                }
+              },
+              {
+                "Effect": "Allow",
+                "Action": [
+                  "s3:GetObject*",
+                  "s3:PutObject*",
+                  "s3:ListBucket"
+                ],
+                "Resource": [
+                  "arn:aws:s3:::tv-shows-data",
+                  "arn:aws:s3:::tv-shows-data/*"
+                ]
+              }
+            ]
+          }
+          EOF
+
+      - name: Attach IAM policy to role
+        run: |
+          aws iam put-role-policy \
+            --role-name ${{ steps.vars.outputs.role_name }} \
+            --policy-name MWAAExecutionPolicy \
+            --policy-document file:///tmp/mwaa-policy.json
+
+      - name: Create security group for MWAA
+        id: create-sg
+        run: |
+          SG_ID=$(aws ec2 create-security-group \
+            --group-name ${{ steps.vars.outputs.sg_name }} \
+            --description "Security group for MWAA" \
+            --vpc-id ${{ github.event.inputs.vpc_id }} \
+            --query 'GroupId' \
+            --output text 2>/dev/null || \
+            aws ec2 describe-security-groups \
+              --filters "Name=group-name,Values=${{ steps.vars.outputs.sg_name }}" "Name=vpc-id,Values=${{ github.event.inputs.vpc_id }}" \
+              --query 'SecurityGroups[0].GroupId' \
+              --output text)
+          echo "sg_id=$SG_ID" >> $GITHUB_OUTPUT
+
+      - name: Configure security group egress
+        run: |
+          aws ec2 authorize-security-group-egress \
+            --group-id ${{ steps.create-sg.outputs.sg_id }} \
+            --protocol -1 \
+            --cidr 0.0.0.0/0 2>/dev/null || echo "Egress rule already exists"
+
+      - name: Create logging configuration
+        run: |
+          cat > /tmp/mwaa-logging.json <<EOF
+          {
+            "DagProcessingLogs": {
+              "Enabled": true,
+              "LogLevel": "INFO"
+            },
+            "SchedulerLogs": {
+              "Enabled": true,
+              "LogLevel": "INFO"
+            },
+            "TaskLogs": {
+              "Enabled": true,
+              "LogLevel": "INFO"
+            },
+            "WebserverLogs": {
+              "Enabled": true,
+              "LogLevel": "INFO"
+            },
+            "WorkerLogs": {
+              "Enabled": true,
+              "LogLevel": "INFO"
+            }
+          }
+          EOF
+
+      - name: Create MWAA environment
+        run: |
+          aws mwaa create-environment \
+            --name ${{ steps.vars.outputs.environment_name }} \
+            --execution-role-arn arn:aws:iam::${{ steps.get-account-id.outputs.account_id }}:role/${{ steps.vars.outputs.role_name }} \
+            --source-bucket-arn arn:aws:s3:::${{ steps.vars.outputs.s3_bucket_name }} \
+            --network-configuration "SecurityGroupIds=${{ steps.create-sg.outputs.sg_id }},SubnetIds=${{ github.event.inputs.subnet_ids }}" \
+            --environment-class mw1.small \
+            --max-workers 2 \
+            --min-workers 1 \
+            --logging-configuration file:///tmp/mwaa-logging.json \
+            --region ${{ env.AWS_REGION }} 2>/dev/null || echo "Environment may already exist or is being created"
+
+      - name: Upload DAGs and requirements
+        run: |
+          aws s3 sync dags/ s3://${{ steps.vars.outputs.s3_bucket_name }}/dags/
+          aws s3 cp infrastructure/requirements.txt s3://${{ steps.vars.outputs.s3_bucket_name }}/requirements.txt
+
+      - name: Get MWAA web server URL
+        id: get-url
+        run: |
+          sleep 30
+          URL=$(aws mwaa get-environment \
+            --name ${{ steps.vars.outputs.environment_name }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'Environment.WebserverUrl' \
+            --output text 2>/dev/null || echo "Environment still being created")
+          echo "webserver_url=$URL" >> $GITHUB_OUTPUT
+
+      - name: Setup summary
+        run: |
+          echo "=========================================="
+          echo "MWAA Setup Completed!"
+          echo "=========================================="
+          echo "Environment: ${{ steps.vars.outputs.environment_name }}"
+          echo "S3 Bucket: ${{ steps.vars.outputs.s3_bucket_name }}"
+          echo "Web Server URL: ${{ steps.get-url.outputs.webserver_url }}"
+          echo ""
+          echo "To get the web server URL later, run:"
+          echo "aws mwaa get-environment --name ${{ steps.vars.outputs.environment_name }} --region ${{ env.AWS_REGION }} --query 'Environment.WebserverUrl' --output text"
+          echo ""
+          echo "To upload DAGs in the future:"
+          echo "aws s3 sync dags/ s3://${{ steps.vars.outputs.s3_bucket_name }}/dags/"
+          echo "=========================================="
+
