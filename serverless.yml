@@ -43,32 +43,9 @@ custom:
 
 resources:
   Resources:
-    ECRRepository:
-      Type: AWS::ECR::Repository
-      Properties:
-        RepositoryName: ${self:custom.ecrRepository}
-        ImageTagMutability: MUTABLE
-        LifecyclePolicy:
-          LifecyclePolicyText: |
-            {
-              "rules": [
-                {
-                  "rulePriority": 1,
-                  "description": "Keep last 10 images",
-                  "selection": {
-                    "tagStatus": "any",
-                    "countType": "imageCountMoreThan",
-                    "countNumber": 10
-                  },
-                  "action": {
-                    "type": "expire"
-                  }
-                }
-              ]
-            }
-    
     CIUser:
       Type: AWS::IAM::User
+      DeletionPolicy: Retain
       Properties:
         UserName: ${self:service}-${self:provider.stage}-ci-cd
         Policies:
@@ -119,8 +96,6 @@ resources:
                   Resource: '*'
 
   Outputs:
-    ECRRepositoryUri:
-      Value: ${self:custom.ecrRepositoryUri}
     LambdaFunctionName:
       Value: ${self:service}-${self:provider.stage}-sync
     CIUserArn:
