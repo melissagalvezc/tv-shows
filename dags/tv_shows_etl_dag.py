@@ -7,7 +7,9 @@ This DAG:
 
 from datetime import datetime, timedelta
 from airflow import DAG
-from airflow.providers.amazon.aws.operators.lambda_function import LambdaInvokeOperator
+from airflow.providers.amazon.aws.operators.lambda_function import (
+    AwsLambdaInvokeFunctionOperator,
+)
 import json
 
 DAG_ID = "tv_shows_extract"
@@ -35,10 +37,9 @@ with DAG(
     catchup=False,
     tags=["tv-shows", "lambda", "data-extraction"],
 ) as dag:
-    extract_task = LambdaInvokeOperator(
+    extract_task = AwsLambdaInvokeFunctionOperator(
         task_id="extract_tv_shows_data",
         function_name=LAMBDA_FUNCTION_NAME,
         payload=LAMBDA_PAYLOAD,
-        aws_conn_id="aws_conn",  # Updated to match your existing connection
-        region_name=AWS_REGION,
+        aws_conn_id="aws_conn",
     )
