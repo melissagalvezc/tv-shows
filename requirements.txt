@@ -2,4 +2,4 @@ apache-airflow-providers-amazon>=8.27.0
 apache-airflow-providers-postgres>=5.10.0
 psycopg2-binary>=2.9.0
 dbt-postgres>=1.7.0
-cosmos>=1.4.0
+astronomer-cosmos>=1.4.0
