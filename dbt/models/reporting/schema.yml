@@ -32,6 +32,11 @@ models:
   - name: rpt_top_10_shows_by_rating
     description: "Top 10 TV shows of all time by rating. Shows the highest rated shows across all networks."
     columns:
+      - name: ranking
+        description: "Ranking position (1-10) based on rating_average"
+        tests:
+          - not_null
+          - unique
       - name: show_name
         description: "Name of the TV show"
         tests:
