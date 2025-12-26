@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: stg_tv_shows
+    description: "Staging model for TV Shows data. Transforms raw JSONB data into structured columns."
+    columns:
+      - name: load_id
+        description: "Primary key from raw table"
+        tests:
+          - unique
+          - not_null
+      - name: tvmaze_id
+        description: "TVMaze show ID"
+        tests:
+          - not_null
+      - name: url
+        description: "TVMaze show URL"
+      - name: name
+        description: "Show name"
+      - name: type
+        description: "Show type (Scripted, Reality, etc.)"
+      - name: language
+        description: "Show language"
+      - name: genres
+        description: "Array of genres"
+      - name: status
+        description: "Show status (Running, Ended, etc.)"
+      - name: runtime
+        description: "Show runtime in minutes"
+      - name: average_runtime
+        description: "Average runtime in minutes"
+      - name: premiered
+        description: "Premiere date"
+      - name: ended
+        description: "End date (if ended)"
+      - name: official_site
+        description: "Official website URL"
+      - name: schedule_time
+        description: "Schedule time"
+      - name: schedule_days
+        description: "Array of schedule days"
+      - name: rating_average
+        description: "Average rating"
+      - name: weight
+        description: "Show weight/priority"
+      - name: network_id
+        description: "Network ID"
+      - name: network_name
+        description: "Network name"
+      - name: network_country_name
+        description: "Network country name"
+      - name: network_country_code
+        description: "Network country code"
+      - name: network_country_timezone
+        description: "Network country timezone"
+      - name: web_channel
+        description: "Web channel name"
+      - name: dvd_country
+        description: "DVD country"
+      - name: externals_imdb
+        description: "IMDB ID"
+      - name: externals_thetvdb
+        description: "TheTVDB ID"
+      - name: externals_tvrage
+        description: "TVRage ID"
+      - name: image_medium
+        description: "Medium image URL"
+      - name: image_original
+        description: "Original image URL"
+      - name: summary
+        description: "Show summary/description"
+      - name: updated
+        description: "Last update timestamp"
+      - name: links_self_href
+        description: "Self link URL"
+      - name: links_previousepisode_href
+        description: "Previous episode link URL"
+      - name: source_file
+        description: "Source S3 file path"
+      - name: loaded_at
+        description: "Timestamp when data was loaded to raw table"
+        tests:
+          - not_null
+

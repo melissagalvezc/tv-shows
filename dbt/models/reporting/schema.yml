@@ -1,0 +1,61 @@
+version: 2
+
+models:
+  - name: rpt_top_show_by_network
+    description: "Top rated show per network. Shows the highest rated show for each network with genre and status information."
+    columns:
+      - name: network_name
+        description: "Network name"
+        tests:
+          - not_null
+      - name: show_name
+        description: "Name of the top rated show for this network"
+        tests:
+          - not_null
+      - name: rating_average
+        description: "Average rating of the show"
+        tests:
+          - not_null
+      - name: genres
+        description: "Array of genres for the show"
+      - name: status
+        description: "Current status of the show (Running, Ended, etc.)"
+      - name: tvmaze_id
+        description: "TVMaze show ID"
+      - name: url
+        description: "TVMaze show URL"
+      - name: premiered
+        description: "Premiere date"
+      - name: ended
+        description: "End date (if ended)"
+
+  - name: rpt_top_10_shows_by_rating
+    description: "Top 10 TV shows of all time by rating. Shows the highest rated shows across all networks."
+    columns:
+      - name: show_name
+        description: "Name of the TV show"
+        tests:
+          - not_null
+      - name: rating_average
+        description: "Average rating of the show"
+        tests:
+          - not_null
+      - name: genres
+        description: "Array of genres for the show"
+      - name: status
+        description: "Current status of the show (Running, Ended, etc.)"
+      - name: network_name
+        description: "Network name"
+      - name: premiered
+        description: "Premiere date"
+      - name: ended
+        description: "End date (if ended)"
+      - name: tvmaze_id
+        description: "TVMaze show ID"
+      - name: url
+        description: "TVMaze show URL"
+      - name: language
+        description: "Language of the show"
+      - name: type
+        description: "Type of show (Scripted, Reality, etc.)"
+

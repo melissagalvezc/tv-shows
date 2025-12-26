@@ -1,0 +1,32 @@
+version: 2
+
+models:
+  - name: dim_tv_shows_current
+    description: "Current version of each TV show. Deduplicated to get the most recent record per tvmaze_id based on loaded_at timestamp."
+    columns:
+      - name: tvmaze_id
+        description: "TVMaze show ID (primary key)"
+        tests:
+          - unique
+          - not_null
+      - name: load_id
+        description: "ID from staging table (most recent load)"
+      - name: loaded_at
+        description: "Timestamp when this version was loaded (most recent)"
+        tests:
+          - not_null
+      - name: name
+        description: "Show name"
+        tests:
+          - not_null
+      - name: status
+        description: "Current show status (Running, Ended, etc.)"
+      - name: rating_average
+        description: "Current average rating"
+      - name: ended
+        description: "End date (if ended, most recent value)"
+      - name: processed_at
+        description: "Timestamp when this record was processed/created in marts layer"
+        tests:
+          - not_null
+
